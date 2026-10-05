@@ -1,9 +1,0 @@
-torch
-torchvision
-pygame
-torchrl
-tensordict
-pandas
-numpy
-questionary
-tqdm
