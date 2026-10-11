@@ -1,26 +1,47 @@
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import pygame
 
-# pygame setup
-pygame.init()
-screen = pygame.display.set_mode((1280, 720))
-clock = pygame.time.Clock()
-running = True
+from game.config import DEFAULT_SCENE
+from game.world import World
 
-while running:
-    # poll for events
-    # pygame.QUIT event means the user clicked X to close your window
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
 
-    # fill the screen with a color to wipe away anything from last frame
-    screen.fill("purple")
+def main() -> None:
+    scene = DEFAULT_SCENE
+    window = scene.window
+    pygame.init()
+    screen = pygame.display.set_mode((window.width, window.height), vsync=1)
+    pygame.display.set_caption("AI of the Hill")
+    clock = pygame.time.Clock()
 
-    # RENDER YOUR GAME HERE
+    supersample = max(1, scene.supersample)
+    buffer = (
+        pygame.Surface((window.width * supersample, window.height * supersample))
+        if supersample > 1 else screen
+    )
 
-    # flip() the display to put your work on screen
-    pygame.display.flip()
+    world = World(scene)
 
-    clock.tick(60)  # limits FPS to 60
+    running = True
+    while running:
+        dt = clock.tick(window.fps) / 1000.0
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
 
-pygame.quit()
+        world.update(dt)
+        buffer.fill(window.background)
+        world.draw(buffer, supersample)
+        if supersample > 1:
+            pygame.transform.smoothscale(
+                buffer, (window.width, window.height), screen)
+        pygame.display.flip()
+
+    pygame.quit()
+
+
+if __name__ == "__main__":
+    main()
