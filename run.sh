@@ -14,6 +14,7 @@ case "$TARGET" in
     game | main) TARGET="game/main.py" ;;
     manual) TARGET="rl/manual_demo.py" ;;
     random) TARGET="rl/random_demo.py" ;;
+    train | training) TARGET="rl/training/training_demo.py" ;;
 esac
 
 if [ ! -f "$TARGET" ]; then
