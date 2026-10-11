@@ -27,8 +27,9 @@ class SandboxState:
 
 class NetworkView:
     def __init__(self, rect, layers: Sequence[int] = (6, 8, 8, 1),
-                 seed: int = 0):
+                 seed: int = 0, draw_counts: Optional[Sequence[int]] = None):
         self.rect = pygame.Rect(rect)
+        self.draw_counts = list(draw_counts) if draw_counts else None
         self.node_radius = 12
         self._rng = random.Random(seed)
         self._glow_cache = {}
@@ -43,6 +44,17 @@ class NetworkView:
         self._freq = [[self._rng.uniform(1.2, 2.8) for _ in range(n)]
                       for n in layers]
         self.activations = [[0.0] * n for n in layers]
+        self._update_radius()
+
+    def _update_radius(self) -> None:
+        counts = self.draw_counts or self.sizes
+        max_nodes = max(counts) if counts else 1
+        pad_y = 26
+        span = self.rect.height - 2 * pad_y
+        if max_nodes > 1:
+            self.node_radius = int(max(2, min(12, span / (max_nodes - 1) * 0.42)))
+        else:
+            self.node_radius = 12
 
     @staticmethod
     def _palette(count: int) -> List[tuple]:
@@ -109,7 +121,7 @@ class NetworkView:
             for (x1, y1), a1 in zip(columns[li], self.activations[li]):
                 for (x2, y2), a2 in zip(columns[li + 1],
                                         self.activations[li + 1]):
-                    v = min(a1, a2)
+                    v = max(0.0, min(1.0, min(a1, a2)))
                     color = (int(80 + 175 * v), int(85 + 80 * v),
                              int(110 - 30 * v))
                     width = 1 + int(2 * v)
@@ -119,6 +131,7 @@ class NetworkView:
         for li in range(len(self.sizes)):
             base = self.palette[li]
             for (x, y), a in zip(columns[li], self.activations[li]):
+                a = max(0.0, min(1.0, a))
                 if a > 0.2:
                     glow = self._glow(int(radius * (1.4 + a)))
                     glow.set_alpha(int(180 * a))
@@ -156,7 +169,7 @@ class NetworkView:
 class TrainingSandbox:
     def __init__(self, games, game_size=(1280, 640), supersample: int = 2,
                  sidebar_width: int = 480, network_layers=(6, 8, 8, 1),
-                 title: str = ""):
+                 network_draw=None, title: str = ""):
         self.games = list(games)
         self.game_size = game_size
         self.ss = max(1, supersample)
@@ -164,7 +177,7 @@ class TrainingSandbox:
         self.title = title
         self.gw, self.gh = game_size
         self.width = self.gw + sidebar_width
-        self.height = max(self.gh, 760)
+        self.height = max(self.gh, 820)
         self.sidebar = pygame.Rect(self.gw, 0, sidebar_width, self.height)
 
         self.buffers = [pygame.Surface((self.gw * self.ss, self.gh * self.ss))
@@ -176,8 +189,9 @@ class TrainingSandbox:
         self.font = pygame.font.Font(None, 32)
         self.font_small = pygame.font.Font(None, 26)
 
-        net_rect = (self.sidebar.left + 24, 226, sidebar_width - 48, 232)
-        self.network = NetworkView(net_rect, network_layers)
+        net_rect = (self.sidebar.left + 24, 226, sidebar_width - 48, 300)
+        self.network = NetworkView(net_rect, network_layers,
+                                   draw_counts=network_draw)
 
     def draw(self, screen: pygame.Surface, state: SandboxState,
              dt: float = 0.0) -> None:
@@ -244,9 +258,9 @@ class TrainingSandbox:
                     (x + 110, y))
 
     def _draw_best_view(self, screen: pygame.Surface, best) -> None:
-        size = 230
+        size = 210
         panel = pygame.Rect(0, 0, size, size)
-        panel.midtop = (self.sidebar.centerx, 486)
+        panel.midtop = (self.sidebar.centerx, 570)
         label = self.font_small.render("BEST INDIVIDUAL", True, _DIM)
         screen.blit(label, (panel.left, panel.top - 26))
 

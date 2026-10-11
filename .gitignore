@@ -1,2 +1,5 @@
 __pycache__
 .venv/
+best_weights/
+checkpoints/
+*.pt
