@@ -70,7 +70,7 @@ class SceneConfig:
     win_score: int = 30
     top_scores: int = 5
     max_zone_seconds: float = 20.0
-    lava_start_time: float = 60.0
+    lava_start_time: float = 30.0
     lava_rise_duration: float = 12.0
     lava_height_fraction: float = 0.5
     shake_duration: float = 0.7
@@ -91,16 +91,25 @@ SIMPLE_HILL = LevelConfig(
     flag_x=700,
 )
 
-def build_agents(count: int = 5, seed: Optional[int] = None
-                 ) -> List[AgentConfig]:
+def build_agents(count: int = 5, seed: Optional[int] = None,
+                 level: Optional[LevelConfig] = None) -> List[AgentConfig]:
+    level = level or SIMPLE_HILL
     colors = random_colors(count, seed)
-    xs = [320, 470, 620, 950, 1080]
-    facings = [1, 1, 1, -1, -1]
+    rng = random.Random(seed)
+    flag_x = level.flag_position()
+    zone = level.flag_zone_width / 2.0
+    margin = 90.0
+
+    def spawn_x() -> float:
+        while True:
+            x = rng.uniform(margin, level.width - margin)
+            if abs(x - flag_x) > zone + 30.0:
+                return x
+
     agents: List[AgentConfig] = []
     for i in range(count):
-        x = xs[i] if i < len(xs) else random.uniform(120, 1160)
-        facing = facings[i] if i < len(facings) else random.choice((-1, 1))
-        agents.append(AgentConfig(f"player{i + 1}", colors[i], x, facing,
+        agents.append(AgentConfig(f"player{i + 1}", colors[i], spawn_x(),
+                                  rng.choice((-1, 1)),
                                   controllable=(i == 0)))
     return agents
 
