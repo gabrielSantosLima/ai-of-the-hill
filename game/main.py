@@ -37,6 +37,7 @@ def main() -> None:
             if event.type == pygame.QUIT:
                 running = False
 
+        world.handle_keyboard()
         world.update(dt)
         buffer.fill(window.background)
         world.draw(buffer, supersample)

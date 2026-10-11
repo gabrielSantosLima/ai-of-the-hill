@@ -1,6 +1,7 @@
 import math
 import os
 import random
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 import pygame
@@ -30,6 +31,14 @@ def _font(size: int) -> pygame.font.Font:
     return font
 
 
+@dataclass
+class AgentAction:
+    move: int = 0
+    jump: bool = False
+    punch: bool = False
+    use_item: bool = False
+
+
 class World:
     def __init__(self, scene: SceneConfig):
         self.scene = scene
@@ -38,6 +47,8 @@ class World:
         self.elements = [Flag(scene.level.flag_height, scene.level.flag_width)]
         self.players: List[Player] = []
         self.controllables: List[Player] = []
+        self.actions: Dict[int, AgentAction] = {}
+        self.external: set = set()
         self._ai_state: Dict[int, dict] = {}
 
         for agent in scene.agents:
@@ -46,6 +57,7 @@ class World:
             self.players.append(player)
             if agent.controllable:
                 self.controllables.append(player)
+                self.external.add(id(player))
             else:
                 self._ai_state[id(player)] = {
                     "dir": agent.facing,
@@ -76,49 +88,64 @@ class World:
         self._pickup_margin = 90.0
         self._flag_pickup_weight = 0.25
 
+    def handle_keyboard(self) -> None:
+        keys = pygame.key.get_pressed()
+        for player in self.controllables:
+            self.actions[id(player)] = AgentAction(
+                move=int(keys[pygame.K_RIGHT] or keys[pygame.K_d]) -
+                int(keys[pygame.K_LEFT] or keys[pygame.K_a]),
+                jump=bool(keys[pygame.K_UP] or keys[pygame.K_w]),
+                punch=bool(keys[pygame.K_SPACE] or keys[pygame.K_j] or
+                          keys[pygame.K_f]),
+                use_item=bool(keys[pygame.K_e]),
+            )
+
+    def set_action(self, player: Player, action: AgentAction) -> None:
+        self.actions[id(player)] = action
+
+    def _ai_decide(self, player: Player, dt: float) -> AgentAction:
+        state = self._ai_state[id(player)]
+        state["timer"] += dt
+        punch = state["timer"] >= state["punch_every"]
+        if punch:
+            state["timer"] = 0.0
+        state["jump_timer"] += dt
+        jump = state["jump_timer"] >= state["jump_every"]
+        if jump:
+            state["jump_timer"] = 0.0
+        use = (player.item is not None and player.on_ground and
+               random.random() < dt * 0.4)
+        return AgentAction(move=state["dir"], jump=jump, punch=punch,
+                           use_item=use)
+
+    def _ai_turn(self, player: Player, move_dir: int) -> None:
+        state = self._ai_state[id(player)]
+        margin = 20 * player.scale
+        if player.x <= margin + 0.5 and move_dir < 0:
+            state["dir"] = 1
+        elif player.x >= self.level.width - margin - 0.5 and move_dir > 0:
+            state["dir"] = -1
+
     def update(self, dt: float) -> None:
         if self.game_over:
             return
         self.time += dt
 
-        keys = pygame.key.get_pressed()
-        for player in self.controllables:
-            if not player.alive:
-                continue
-            move_dir = int(keys[pygame.K_RIGHT] or keys[pygame.K_d]) - \
-                int(keys[pygame.K_LEFT] or keys[pygame.K_a])
-            jump = bool(keys[pygame.K_UP] or keys[pygame.K_w])
-            player.update(dt, self.terrain, move_dir, self.level.width, jump)
-            if keys[pygame.K_SPACE] or keys[pygame.K_j] or keys[pygame.K_f]:
-                player.punch()
-            if keys[pygame.K_e]:
-                player.use_item(self)
-
         for player in self.players:
             if not player.alive:
                 continue
-            state = self._ai_state.get(id(player))
-            if state is None:
-                continue
-            state["timer"] += dt
-            if state["timer"] >= state["punch_every"]:
-                state["timer"] = 0.0
+            action = self.actions.get(id(player))
+            if action is None and id(player) not in self.external:
+                action = self._ai_decide(player, dt)
+                self._ai_turn(player, action.move)
+            if action is None:
+                action = AgentAction()
+            player.update(dt, self.terrain, action.move, self.level.width,
+                          action.jump)
+            if action.punch:
                 player.punch()
-            state["jump_timer"] += dt
-            jump = False
-            if state["jump_timer"] >= state["jump_every"]:
-                state["jump_timer"] = 0.0
-                jump = True
-            if player.item is not None and player.on_ground and \
-                    random.random() < dt * 0.4:
+            if action.use_item:
                 player.use_item(self)
-            move_dir = state["dir"]
-            player.update(dt, self.terrain, move_dir, self.level.width, jump)
-            margin = 20 * player.scale
-            if player.x <= margin + 0.5 and move_dir < 0:
-                state["dir"] = 1
-            elif player.x >= self.level.width - margin - 0.5 and move_dir > 0:
-                state["dir"] = -1
 
         self._resolve_punches()
 
