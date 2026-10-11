@@ -1,8 +1,26 @@
+import colorsys
+import os
+import random
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 Point = Tuple[float, float]
 Color = Tuple[int, int, int]
+
+_GOLDEN_RATIO_CONJUGATE = 0.618033988749895
+
+
+def random_colors(count: int, seed: Optional[int] = None) -> List[Color]:
+    rng = random.Random(seed)
+    start = rng.random()
+    colors: List[Color] = []
+    for i in range(count):
+        hue = (start + i * _GOLDEN_RATIO_CONJUGATE) % 1.0
+        saturation = 0.65 + 0.35 * (i % 2)
+        value = 0.80 + 0.18 * ((i // 2) % 3) / 2
+        r, g, b = colorsys.hsv_to_rgb(hue, saturation, value)
+        colors.append((int(r * 255), int(g * 255), int(b * 255)))
+    return colors
 
 
 @dataclass
@@ -73,13 +91,24 @@ SIMPLE_HILL = LevelConfig(
     flag_x=700,
 )
 
+def build_agents(count: int = 5, seed: Optional[int] = None
+                 ) -> List[AgentConfig]:
+    colors = random_colors(count, seed)
+    xs = [320, 470, 620, 950, 1080]
+    facings = [1, 1, 1, -1, -1]
+    agents: List[AgentConfig] = []
+    for i in range(count):
+        x = xs[i] if i < len(xs) else random.uniform(120, 1160)
+        facing = facings[i] if i < len(facings) else random.choice((-1, 1))
+        agents.append(AgentConfig(f"player{i + 1}", colors[i], x, facing,
+                                  controllable=(i == 0)))
+    return agents
+
+
+_seed_env = os.environ.get("AOTH_SEED")
+_default_seed = int(_seed_env) if _seed_env else None
+
 DEFAULT_SCENE = SceneConfig(
     level=SIMPLE_HILL,
-    agents=[
-        AgentConfig("blue", (70, 150, 255), 320, 1, controllable=True),
-        AgentConfig("purple", (150, 80, 210), 470, 1),
-        AgentConfig("green", (60, 180, 90), 620, 1),
-        AgentConfig("yellow", (225, 160, 20), 950, -1),
-        AgentConfig("magenta", (225, 80, 160), 1080, -1),
-    ],
+    agents=build_agents(5, _default_seed),
 )
