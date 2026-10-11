@@ -13,6 +13,7 @@ TARGET="${1:-game/main.py}"
 case "$TARGET" in
     game | main) TARGET="game/main.py" ;;
     manual) TARGET="rl/manual_demo.py" ;;
+    best) TARGET="rl/manual_vs_best.py" ;;
     random) TARGET="rl/random_demo.py" ;;
     demo) TARGET="rl/training/training_demo.py" ;;
     train | training) TARGET="rl/training/training_koth_dqn.py" ;;

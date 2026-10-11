@@ -155,6 +155,28 @@ class DQNPopulation:
         self.copy_to_target()
 
 
+class SingleAgentDQN:
+    def __init__(self, weights: Dict[str, torch.Tensor],
+                 device: torch.device):
+        self.device = device
+        self.w = {name: weights[name].to(device).float()
+                  for name in _PARAM_SHAPES}
+
+    @classmethod
+    def load(cls, path: str, device: torch.device) -> "SingleAgentDQN":
+        checkpoint = torch.load(path, map_location=device)
+        return cls(checkpoint["weights"], device)
+
+    def q_values(self, observations: torch.Tensor) -> torch.Tensor:
+        h1 = F.relu(observations @ self.w["W1"].t() + self.w["b1"])
+        h2 = F.relu(h1 @ self.w["W2"].t() + self.w["b2"])
+        return h2 @ self.w["W3"].t() + self.w["b3"]
+
+    def act(self, observations: torch.Tensor) -> torch.Tensor:
+        with torch.no_grad():
+            return self.q_values(observations).argmax(dim=1)
+
+
 class ReplayBuffer:
     def __init__(self, num_agents: int, capacity: int, obs_dim: int,
                  device: torch.device):
