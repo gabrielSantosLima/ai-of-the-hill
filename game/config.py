@@ -14,6 +14,7 @@ class LevelConfig:
     flag_height: float = 70.0
     flag_width: float = 40.0
     flag_x: Optional[float] = None
+    flag_zone_width: float = 130.0
 
     def peak(self) -> Point:
         return min(self.control_points, key=lambda p: p[1])
@@ -48,6 +49,14 @@ class SceneConfig:
     window: WindowConfig = field(default_factory=WindowConfig)
     character_scale: float = 2.0
     supersample: int = 2
+    win_score: int = 30
+    top_scores: int = 5
+    max_zone_seconds: float = 20.0
+    lava_start_time: float = 60.0
+    lava_rise_duration: float = 12.0
+    lava_height_fraction: float = 0.5
+    shake_duration: float = 0.7
+    shake_magnitude: float = 8.0
 
 
 SIMPLE_HILL = LevelConfig(
@@ -68,7 +77,9 @@ DEFAULT_SCENE = SceneConfig(
     level=SIMPLE_HILL,
     agents=[
         AgentConfig("blue", (70, 150, 255), 320, 1, controllable=True),
+        AgentConfig("purple", (150, 80, 210), 470, 1),
         AgentConfig("green", (60, 180, 90), 620, 1),
         AgentConfig("yellow", (225, 160, 20), 950, -1),
+        AgentConfig("magenta", (225, 80, 160), 1080, -1),
     ],
 )

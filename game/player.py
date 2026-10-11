@@ -58,7 +58,8 @@ def _glove_sprite(color: Color, target_h: int, flip: bool) -> pygame.Surface:
 
 class Player:
     def __init__(self, color: Color, x: float, facing: int = 1,
-                 scale: float = 2.0, speed: float = 220.0):
+                 scale: float = 2.0, speed: float = 220.0, name: str = ""):
+        self.name = name
         self.color = color
         self.x = x
         self.y = 0.0
@@ -81,15 +82,30 @@ class Player:
         self.punch_cooldown = 1.0
         self.cooldown_timer = 0.0
         self.punch_hit = False
-        self.punch_force = 800.0
-        self.punch_lift = 300.0
+        self.punch_force = 1250.0
+        self.punch_lift = 360.0
         self.punch_range = 27.0 * scale
         self.stun = 0.0
-        self.stun_duration = 0.4
+        self.stun_duration = 0.5
+        self.score = 0
+        self.alive = True
+        self.zone_time = 0.0
 
     @property
     def radius(self) -> float:
         return 9 * self.scale
+
+    def in_zone(self, flag_x: float, half_width: float,
+                ground_y: float) -> bool:
+        return (self.alive and abs(self.x - flag_x) <= half_width and
+                self.y <= ground_y + 30 * self.scale)
+
+    def kill(self) -> None:
+        self.alive = False
+        self.vx = 0.0
+        self.vy = 0.0
+        self.stun = 0.0
+        self.on_ground = False
 
     def update(self, dt: float, terrain: Terrain, move_dir: int,
                width: int, jump: bool = False) -> None:
@@ -232,3 +248,15 @@ class Player:
         glove = pygame.transform.rotate(glove, -math.degrees(theta))
         surface.blit(glove, (int(glove_anchor[0] - glove.get_width() / 2),
                              int(glove_anchor[1] - glove.get_height() / 2)))
+
+        if self.stun > 0:
+            t = pygame.time.get_ticks() / 120.0
+            star_r = max(1, int(s(3.5)))
+            for k in range(3):
+                ang = t + k * (2 * math.pi / 3)
+                sx = center[0] + math.cos(ang) * s(14)
+                sy = center[1] - s(15) + math.sin(ang) * s(5)
+                pygame.draw.circle(surface, (250, 210, 40),
+                                   (int(sx), int(sy)), star_r)
+                pygame.draw.circle(surface, (120, 90, 10),
+                                   (int(sx), int(sy)), star_r, 1)
