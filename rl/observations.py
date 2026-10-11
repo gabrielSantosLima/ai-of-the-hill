@@ -2,7 +2,7 @@ import math
 
 import numpy as np
 
-OBSERVATION_SIZE = 6
+OBSERVATION_SIZE = 7
 
 
 def build_observations(world, players, horizon: float = 60.0) -> np.ndarray:
@@ -53,4 +53,7 @@ def build_observations(world, players, horizon: float = 60.0) -> np.ndarray:
     observation[:, 3] = left
     observation[:, 4] = right
     observation[:, 5] = power
+    observation[:, 6] = np.array(
+        [1.0 if p.item is not None else 0.0 for p in players],
+        dtype=np.float32)
     return observation

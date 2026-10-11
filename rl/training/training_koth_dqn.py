@@ -21,7 +21,7 @@ from rl.sandbox import SandboxState, TrainingSandbox
 # ---------------------------------------------------------------------------
 CONFIG = {
     "seed": 0,
-    "num_agents": 10,
+    "num_agents": 5,
     "hidden": 10,
     "device": "auto",                 # "auto" | "cuda" | "cpu"
     "learning_rate": 1e-3,
@@ -35,8 +35,8 @@ CONFIG = {
     # Exploration (epsilon-greedy)
     "epsilon_start": 1.0,
     "epsilon_end": 0.05,
-    "epsilon_decay_steps": 4000,
-    "epsilon_reset_per_generation": True,
+    "epsilon_decay_steps": 1000,
+    "epsilon_reset_per_generation": False,
     # Evolution
     "replace_fraction": 0.5,          # worst fraction replaced by best copy
     "mutation_prob": 0.10,            # per-weight mutation probability
@@ -44,6 +44,7 @@ CONFIG = {
     # Reward
     "time_penalty": 0.01,             # per decision without scoring
     "death_penalty": 1.0,
+    "lava_penalty": 2.0,              # extra when death cause is lava
     "obs_horizon": 30.0,             # seconds used to normalize time
     # Episode / generation
     "max_generation_seconds": 300.0,
@@ -128,6 +129,7 @@ def main() -> None:
 
     generation = 1
     global_decisions = 0
+    best_record = -1
     running = True
 
     while running:
@@ -179,9 +181,15 @@ def main() -> None:
                 new_alive = torch.tensor([p.alive for p in env.agents],
                                          dtype=torch.bool, device=device)
                 delta = new_scores - prev_scores
-                died = (prev_alive & ~new_alive).float()
+                died = prev_alive & ~new_alive
+                penalty = torch.zeros(count, device=device)
+                for i in range(count):
+                    if bool(died[i]):
+                        cause = env.agents[i].death_cause
+                        penalty[i] = (cfg["lava_penalty"] if cause == "lava"
+                                      else cfg["death_penalty"])
                 reward = (delta - cfg["time_penalty"] * (delta == 0).float()
-                          - cfg["death_penalty"] * died)
+                          - penalty)
                 new_obs = torch.tensor(
                     build_observations(env.world, env.agents,
                                        cfg["obs_horizon"]), device=device)
@@ -233,21 +241,22 @@ def main() -> None:
             torch.save(
                 {"generation": generation, "state": pop.state_dict()},
                 os.path.join(cfg["checkpoint_dir"], f"gen_{generation:04d}.pt"))
-        if cfg["save_best"]:
-            scores = torch.tensor([p.score for p in env.agents],
-                                  dtype=torch.float32, device=device)
-            best_index = int(torch.argmax(scores).item())
-            torch.save(
-                {"generation": generation, "agent": best_index,
-                 "weights": pop.agent_weights(best_index)},
-                os.path.join(cfg["best_dir"], "best.pt"))
-
         scores = torch.tensor([p.score for p in env.agents],
                               dtype=torch.float32, device=device)
-        best_index = pop.evolve(scores, cfg["replace_fraction"],
-                                cfg["mutation_prob"], cfg["mutation_std"])
-        print(f"generation {generation} done | best agent {best_index} "
-              f"score {int(scores.max().item())} | "
+        gen_best_index = int(torch.argmax(scores).item())
+        gen_best_score = int(scores.max().item())
+        if cfg["save_best"] and gen_best_score > best_record:
+            best_record = gen_best_score
+            torch.save(
+                {"generation": generation, "agent": gen_best_index,
+                 "score": gen_best_score,
+                 "weights": pop.agent_weights(gen_best_index)},
+                os.path.join(cfg["best_dir"], "best.pt"))
+
+        pop.evolve(scores, cfg["replace_fraction"],
+                   cfg["mutation_prob"], cfg["mutation_std"])
+        print(f"generation {generation} done | best agent {gen_best_index} "
+              f"score {gen_best_score} | record {best_record} | "
               f"decisions {decision_in_gen}", flush=True)
         generation += 1
 

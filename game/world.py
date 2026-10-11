@@ -279,7 +279,7 @@ class World:
         if self.lava.active:
             for player in self.players:
                 if player.alive and player.y >= self.lava.surface_y:
-                    player.kill()
+                    player.kill("lava")
 
     def _update_winner(self) -> None:
         for player in self.players:

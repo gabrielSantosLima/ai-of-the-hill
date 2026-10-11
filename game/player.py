@@ -91,6 +91,7 @@ class Player:
         self.alive = True
         self.zone_time = 0.0
         self.item = None
+        self.death_cause = None
 
     @property
     def radius(self) -> float:
@@ -101,8 +102,9 @@ class Player:
         return (self.alive and abs(self.x - flag_x) <= half_width and
                 self.y <= ground_y + 30 * self.scale)
 
-    def kill(self) -> None:
+    def kill(self, cause: Optional[str] = None) -> None:
         self.alive = False
+        self.death_cause = cause
         self.vx = 0.0
         self.vy = 0.0
         self.stun = 0.0
