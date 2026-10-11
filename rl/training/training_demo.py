@@ -73,7 +73,11 @@ def main() -> None:
 
         env.step([env.action_from_index(a) for a in actions])
 
-        best = max(env.agents, key=lambda p: (p.score, p.alive))
+        ordered = sorted(env.agents, key=lambda p: (p.score, p.alive),
+                         reverse=True)
+        best = ordered[0]
+        ranking = [{"name": p.name, "color": p.color, "score": p.score,
+                    "alive": p.alive} for p in ordered[:8]]
         state = SandboxState(
             generation=generation,
             population=env.num_agents,
@@ -82,6 +86,7 @@ def main() -> None:
             title="Treino: demo (mock)",
             network=mock_activations(elapsed),
             best=best,
+            ranking=ranking,
         )
         sandbox.draw(screen, state, dt)
         pygame.display.flip()

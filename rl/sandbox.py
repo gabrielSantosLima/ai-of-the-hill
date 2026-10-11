@@ -23,6 +23,7 @@ class SandboxState:
     title: str = ""
     network: Optional[List[List[float]]] = None
     best: object = None
+    ranking: List[dict] = field(default_factory=list)
 
 
 class NetworkView:
@@ -178,6 +179,7 @@ class TrainingSandbox:
         self.gw, self.gh = game_size
         self.width = self.gw + sidebar_width
         self.height = max(self.gh, 820)
+        self.game_pos = (0, (self.height - self.gh) // 2)
         self.sidebar = pygame.Rect(self.gw, 0, sidebar_width, self.height)
 
         self.buffers = [pygame.Surface((self.gw * self.ss, self.gh * self.ss))
@@ -199,6 +201,7 @@ class TrainingSandbox:
         screen.fill(_SIDEBAR_BG, self.sidebar)
         pygame.draw.line(screen, (60, 64, 76), (self.gw, 0),
                          (self.gw, self.height), 3)
+        self._draw_ranking(screen, state)
         self._draw_header(screen, state)
         self.network.update(dt, state.network)
         self.network.draw(screen)
@@ -230,6 +233,34 @@ class TrainingSandbox:
             screen.blit(self.frames[i], pos)
             pygame.draw.rect(screen, (10, 10, 12),
                              pygame.Rect(pos, display), 3)
+
+    def _draw_ranking(self, screen: pygame.Surface,
+                      state: SandboxState) -> None:
+        if not state.ranking:
+            return
+        left = 14
+        top = self.game_pos[1] + 14
+        row_h = 28
+        width = 210
+        panel = pygame.Rect(left, top, width,
+                            row_h * len(state.ranking) + 12)
+        background = pygame.Surface(panel.size, pygame.SRCALPHA)
+        background.fill((18, 18, 24, 175))
+        screen.blit(background, panel.topleft)
+        pygame.draw.rect(screen, (70, 74, 88), panel, 2)
+        y = panel.top + 6
+        for entry in state.ranking:
+            color = entry.get("color", (255, 255, 255))
+            name = entry.get("name", "?")
+            score = entry.get("score", 0)
+            swatch = pygame.Rect(panel.left + 8, y + 3, 16, 16)
+            pygame.draw.rect(screen, color, swatch)
+            pygame.draw.rect(screen, (10, 10, 12), swatch, 2)
+            label = self.font_small.render(str(name), True, _INK)
+            screen.blit(label, (swatch.right + 8, y))
+            value = self.font_small.render(str(score), True, _OUTPUT_COLOR)
+            screen.blit(value, (panel.right - 10 - value.get_width(), y))
+            y += row_h
 
     def _draw_header(self, screen: pygame.Surface,
                      state: SandboxState) -> None:

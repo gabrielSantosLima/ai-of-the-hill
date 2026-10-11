@@ -44,7 +44,7 @@ CONFIG = {
     # Reward
     "time_penalty": 0.01,             # per decision without scoring
     "death_penalty": 1.0,
-    "obs_horizon": 60.0,              # seconds used to normalize time
+    "obs_horizon": 30.0,             # seconds used to normalize time
     # Episode / generation
     "max_generation_seconds": 300.0,
     # Rendering / sandbox
@@ -199,19 +199,29 @@ def main() -> None:
                 global_decisions += 1
 
             if cfg["render"]:
-                scores_now = torch.tensor([p.score for p in env.agents],
-                                          device=device)
-                best_index = int(torch.argmax(scores_now).item())
+                order = sorted(
+                    range(count),
+                    key=lambda i: (env.agents[i].score,
+                                   env.agents[i].alive),
+                    reverse=True)
+                best_index = order[0]
+                ranking = [
+                    {"name": env.agents[i].name, "color": env.agents[i].color,
+                     "score": env.agents[i].score,
+                     "alive": env.agents[i].alive}
+                    for i in order[:8]
+                ]
                 network = display_activations(pop.layer_activations(obs),
                                               best_index)
                 state = SandboxState(
                     generation=generation,
                     population=count,
                     alive=sum(1 for p in env.agents if p.alive),
-                    record=int(scores_now.max().item()),
+                    record=env.agents[best_index].score,
                     title=f"eps {epsilon:.2f}   loss {loss_value:.3f}",
                     network=network,
                     best=env.agents[best_index],
+                    ranking=ranking,
                 )
                 sandbox.draw(screen, state, dt)
                 pygame.display.flip()
