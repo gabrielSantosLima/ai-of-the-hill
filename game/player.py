@@ -90,6 +90,7 @@ class Player:
         self.score = 0
         self.alive = True
         self.zone_time = 0.0
+        self.item = None
 
     @property
     def radius(self) -> float:
@@ -106,6 +107,23 @@ class Player:
         self.vy = 0.0
         self.stun = 0.0
         self.on_ground = False
+        self.item = None
+
+    def knockback(self, direction: int, force: float, lift: float,
+                  stun: float) -> None:
+        if not self.alive:
+            return
+        self.vx = direction * force
+        self.vy = -lift
+        self.on_ground = False
+        self.stun = max(self.stun, stun)
+        self.punch_timer = 0.0
+
+    def use_item(self, world) -> None:
+        if self.item is None or not self.alive or not self.on_ground:
+            return
+        self.item.use(world, self)
+        self.item = None
 
     def update(self, dt: float, terrain: Terrain, move_dir: int,
                width: int, jump: bool = False) -> None:
@@ -179,11 +197,8 @@ class Player:
             self.punch_hit = False
 
     def get_punched(self, direction: int) -> None:
-        self.vx = direction * self.punch_force
-        self.vy = -self.punch_lift
-        self.on_ground = False
-        self.stun = self.stun_duration
-        self.punch_timer = 0.0
+        self.knockback(direction, self.punch_force, self.punch_lift,
+                       self.stun_duration)
 
     def punch_amount(self) -> float:
         if self.punch_timer <= 0:
@@ -260,3 +275,6 @@ class Player:
                                    (int(sx), int(sy)), star_r)
                 pygame.draw.circle(surface, (120, 90, 10),
                                    (int(sx), int(sy)), star_r, 1)
+
+        if self.item is not None and self.alive:
+            self.item.draw_held(surface, ss, self)

@@ -1,3 +1,4 @@
+import math
 import os
 import random
 from typing import Dict, List, Optional, Tuple
@@ -8,7 +9,9 @@ from .background import Background
 from .config import SceneConfig
 from .elements import Flag
 from .lava import Lava
+from .pickups import Pickup
 from .player import Player
+from .powers import POWER_UPS, Explosion
 from .terrain import Terrain
 
 _LAVA_PATH = os.path.join(
@@ -16,14 +19,15 @@ _LAVA_PATH = os.path.join(
     "assets", "lava_strip.png",
 )
 
-_FONT: Optional[pygame.font.Font] = None
+_FONTS: Dict[int, pygame.font.Font] = {}
 
 
-def _font() -> pygame.font.Font:
-    global _FONT
-    if _FONT is None:
-        _FONT = pygame.font.Font(None, 42)
-    return _FONT
+def _font(size: int) -> pygame.font.Font:
+    font = _FONTS.get(size)
+    if font is None:
+        font = pygame.font.Font(None, size)
+        _FONTS[size] = font
+    return font
 
 
 class World:
@@ -64,6 +68,13 @@ class World:
         self._shake: Tuple[float, float] = (0.0, 0.0)
         self.floaters: List[dict] = []
         self._backdrop_cache: Dict[Tuple[int, int, int], pygame.Surface] = {}
+        self.pickups: List[Pickup] = []
+        self.dynamites: List = []
+        self.effects: List[Explosion] = []
+        self._pickup_timer = random.uniform(6.0, 10.0)
+        self._pickup_interval = (18.0, 30.0)
+        self._pickup_margin = 90.0
+        self._flag_pickup_weight = 0.25
 
     def update(self, dt: float) -> None:
         if self.game_over:
@@ -80,6 +91,8 @@ class World:
             player.update(dt, self.terrain, move_dir, self.level.width, jump)
             if keys[pygame.K_SPACE] or keys[pygame.K_j] or keys[pygame.K_f]:
                 player.punch()
+            if keys[pygame.K_e]:
+                player.use_item(self)
 
         for player in self.players:
             if not player.alive:
@@ -96,6 +109,9 @@ class World:
             if state["jump_timer"] >= state["jump_every"]:
                 state["jump_timer"] = 0.0
                 jump = True
+            if player.item is not None and player.on_ground and \
+                    random.random() < dt * 0.4:
+                player.use_item(self)
             move_dir = state["dir"]
             player.update(dt, self.terrain, move_dir, self.level.width, jump)
             margin = 20 * player.scale
@@ -111,11 +127,89 @@ class World:
             for j in range(i + 1, len(alive)):
                 alive[i].resolve_collision(alive[j])
 
+        self._update_pickups(dt)
+        self._update_dynamites(dt)
+        self._update_effects(dt)
         self._update_scoring(dt)
         self._update_lava(dt)
         self._update_winner()
         self._update_shake(dt)
         self._update_floaters(dt)
+
+    def _sample_pickup_x(self) -> float:
+        low = self._pickup_margin
+        high = self.level.width - self._pickup_margin
+        max_dist = max(self.flag_x - low, high - self.flag_x, 1.0)
+        while True:
+            x = random.uniform(low, high)
+            dist = abs(x - self.flag_x) / max_dist
+            weight = self._flag_pickup_weight + (1 - self._flag_pickup_weight) * dist
+            if random.random() < weight:
+                return x
+
+    def _update_pickups(self, dt: float) -> None:
+        self._pickup_timer -= dt
+        if self._pickup_timer <= 0:
+            self._pickup_timer = random.uniform(*self._pickup_interval)
+            power = random.choice(list(POWER_UPS.values()))
+            self.pickups.append(Pickup(power, self._sample_pickup_x()))
+        for pickup in self.pickups:
+            pickup.update(dt, self.terrain)
+        for pickup in list(self.pickups):
+            for player in self.players:
+                if player.alive and player.item is None and pickup.overlaps(player):
+                    pickup.power.on_pickup(self, player)
+                    self.pickups.remove(pickup)
+                    break
+
+    def _update_dynamites(self, dt: float) -> None:
+        for bomb in self.dynamites:
+            bomb.update(dt)
+        for bomb in [b for b in self.dynamites if b.exploded]:
+            effect = Explosion(bomb.x, bomb.y - 10,
+                               bomb.power.blast_radius, bomb.power)
+            self.effects.append(effect)
+            self._apply_blast(bomb.x, bomb.y, bomb.power, effect)
+            self.dynamites.remove(bomb)
+
+    def _apply_blast(self, x: float, y: float, power, effect=None) -> None:
+        for player in self.players:
+            if not player.alive:
+                continue
+            dx = player.x - x
+            dy = player.y - y
+            dist = math.hypot(dx, dy)
+            if dist > power.blast_radius:
+                continue
+            if effect is not None:
+                effect.hit.add(id(player))
+            if dx == 0:
+                direction = random.choice((-1, 1))
+            else:
+                direction = 1 if dx > 0 else -1
+            falloff = 1.0 - 0.5 * (dist / power.blast_radius)
+            player.knockback(direction, power.blast_force * falloff,
+                             power.blast_lift * falloff, power.blast_stun)
+
+    def _update_effects(self, dt: float) -> None:
+        for effect in self.effects:
+            effect.update(dt)
+            if effect.power is None:
+                continue
+            radius = effect.current_radius()
+            for player in self.players:
+                if not player.alive or id(player) in effect.hit:
+                    continue
+                dist = math.hypot(player.x - effect.x, player.y - effect.y)
+                if dist <= radius:
+                    effect.hit.add(id(player))
+                    direction = 1 if player.x >= effect.x else -1
+                    falloff = 1.0 - 0.5 * min(1.0, dist / effect.radius)
+                    player.knockback(direction,
+                                     effect.power.blast_force * falloff,
+                                     effect.power.blast_lift * falloff,
+                                     effect.power.blast_stun)
+        self.effects = [e for e in self.effects if not e.done]
 
     def _update_floaters(self, dt: float) -> None:
         for floater in self.floaters:
@@ -223,17 +317,27 @@ class World:
     def draw(self, surface: pygame.Surface, ss: float = 1.0) -> None:
         surface.blit(self._backdrop(surface, ss), (0, 0))
         self.lava.draw(surface, ss)
+        for pickup in self.pickups:
+            pickup.draw(surface, ss)
         for player in self.players:
             if player.alive:
                 player.draw(surface, ss)
+        for bomb in self.dynamites:
+            bomb.draw(surface, ss)
+        for effect in self.effects:
+            effect.draw(surface, ss)
         self._draw_floaters(surface, ss)
 
     def _draw_floaters(self, surface: pygame.Surface, ss: float) -> None:
-        font = _font()
+        font = _font(int(58 * ss))
+        outline = font.render("+1", True, (40, 25, 0))
+        text = font.render("+1", True, (255, 215, 30))
         for floater in self.floaters:
-            alpha = 1.0 - floater["age"] / floater["life"]
-            text = font.render("+1", True, floater["color"])
-            text.set_alpha(int(255 * max(0.0, alpha)))
+            alpha = int(255 * max(0.0, 1.0 - floater["age"] / floater["life"]))
+            outline.set_alpha(alpha)
+            text.set_alpha(alpha)
             x = floater["x"] * ss - text.get_width() / 2
             y = (floater["y"] - floater["age"] * 60) * ss
+            for ox, oy in ((-2, 0), (2, 0), (0, -2), (0, 2)):
+                surface.blit(outline, (int(x + ox), int(y + oy)))
             surface.blit(text, (int(x), int(y)))
