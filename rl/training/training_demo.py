@@ -10,10 +10,11 @@ sys.path.insert(0, _ROOT)
 import pygame
 
 from game.config import DEFAULT_SCENE
-from game.interface import GameInterface
+from game.interface import ACTION_NAMES, GameInterface
+from rl.observations import OBSERVATION_LABELS
 from rl.sandbox import SandboxState, TrainingSandbox
 
-NETWORK_LAYERS = [6, 8, 8, 1]
+NETWORK_LAYERS = [10, 8, 8, 8]
 
 
 def mock_activations(elapsed: float):
@@ -49,6 +50,7 @@ def main() -> None:
     elapsed = 0.0
     generation = 1
     generation_timer = 0.0
+    history = []
 
     running = True
     while running:
@@ -63,6 +65,8 @@ def main() -> None:
         generation_timer += dt
         if generation_timer >= 12.0:
             generation_timer = 0.0
+            history.append((generation, max(
+                (p.score for p in env.agents), default=0)))
             generation += 1
 
         decision_timer += dt
@@ -87,6 +91,9 @@ def main() -> None:
             network=mock_activations(elapsed),
             best=best,
             ranking=ranking,
+            input_labels=OBSERVATION_LABELS,
+            output_labels=ACTION_NAMES,
+            history=history,
         )
         sandbox.draw(screen, state, dt)
         pygame.display.flip()

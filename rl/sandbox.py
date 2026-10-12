@@ -24,6 +24,11 @@ class SandboxState:
     network: Optional[List[List[float]]] = None
     best: object = None
     ranking: List[dict] = field(default_factory=list)
+    input_labels: Optional[List[str]] = None
+    output_labels: Optional[List[str]] = None
+    input_values: Optional[List[float]] = None
+    output_values: Optional[List[float]] = None
+    history: List[tuple] = field(default_factory=list)
 
 
 class NetworkView:
@@ -33,8 +38,12 @@ class NetworkView:
         self.draw_counts = list(draw_counts) if draw_counts else None
         self.node_radius = 12
         self._rng = random.Random(seed)
-        self._glow_cache = {}
         self.time = 0.0
+        self.input_labels: Optional[List[str]] = None
+        self.output_labels: Optional[List[str]] = None
+        self.input_values: Optional[List[float]] = None
+        self.output_values: Optional[List[float]] = None
+        self.font = pygame.font.Font(None, 24)
         self._set_layers(list(layers))
 
     def _set_layers(self, layers: List[int]) -> None:
@@ -106,16 +115,6 @@ class NetworkView:
             columns.append([(xs[li], y) for y in ys])
         return columns
 
-    def _glow(self, radius: int) -> pygame.Surface:
-        glow = self._glow_cache.get(radius)
-        if glow is None:
-            size = radius * 4
-            glow = pygame.Surface((size, size), pygame.SRCALPHA)
-            pygame.draw.circle(glow, (255, 190, 70, 90),
-                               (size // 2, size // 2), radius)
-            self._glow_cache[radius] = glow
-        return glow
-
     def draw(self, surface: pygame.Surface) -> None:
         columns = self._positions()
         for li in range(len(self.sizes) - 1):
@@ -133,18 +132,51 @@ class NetworkView:
             base = self.palette[li]
             for (x, y), a in zip(columns[li], self.activations[li]):
                 a = max(0.0, min(1.0, a))
-                if a > 0.2:
-                    glow = self._glow(int(radius * (1.4 + a)))
-                    glow.set_alpha(int(180 * a))
-                    surface.blit(glow, (x - glow.get_width() / 2,
-                                        y - glow.get_height() / 2))
-                shade = 0.45 + 0.55 * a
+                shade = 0.35 + 0.65 * a
                 color = (int(base[0] * shade), int(base[1] * shade),
                          int(base[2] * shade))
                 pygame.draw.circle(surface, color, (int(x), int(y)), radius)
                 pygame.draw.circle(surface, (15, 16, 20), (int(x), int(y)),
                                    radius, 2)
         self._draw_edges(surface, columns)
+        self._draw_tooltip(surface, columns)
+
+    def _draw_tooltip(self, surface, columns) -> None:
+        if pygame.display.get_surface() is None:
+            return
+        labels = (self.input_labels, self.output_labels)
+        values = (self.input_values, self.output_values)
+        hovered = None
+        for layer_index, column in ((0, columns[0]), (-1, columns[-1])):
+            layer_labels = labels[0] if layer_index == 0 else labels[1]
+            if not layer_labels:
+                continue
+            mx, my = pygame.mouse.get_pos()
+            for i, (x, y) in enumerate(column):
+                if (mx - x) ** 2 + (my - y) ** 2 <= (self.node_radius + 5) ** 2:
+                    layer_values = values[0] if layer_index == 0 else values[1]
+                    value = (layer_values[i] if layer_values and i <
+                             len(layer_values) else
+                             self.activations[layer_index][i])
+                    hovered = (x, y, layer_labels[i], value)
+                    break
+            if hovered:
+                break
+        if hovered is None:
+            return
+        x, y, label, value = hovered
+        text = f"{label}: {value:.3f}"
+        rendered = self.font.render(text, True, (240, 240, 245))
+        pad = 6
+        box = pygame.Rect(0, 0, rendered.get_width() + pad * 2,
+                          rendered.get_height() + pad * 2)
+        box.midleft = (int(x) + self.node_radius + 10, int(y))
+        box.clamp_ip(surface.get_rect())
+        background = pygame.Surface(box.size, pygame.SRCALPHA)
+        background.fill((10, 12, 18, 235))
+        surface.blit(background, box.topleft)
+        pygame.draw.rect(surface, (120, 200, 255), box, 2)
+        surface.blit(rendered, (box.left + pad, box.top + pad))
 
     def _draw_edges(self, surface, columns) -> None:
         first_x = columns[0][0][0]
@@ -178,7 +210,7 @@ class TrainingSandbox:
         self.title = title
         self.gw, self.gh = game_size
         self.width = self.gw + sidebar_width
-        self.height = max(self.gh, 820)
+        self.height = max(self.gh, 920)
         self.game_pos = (0, (self.height - self.gh) // 2)
         self.sidebar = pygame.Rect(self.gw, 0, sidebar_width, self.height)
 
@@ -203,10 +235,15 @@ class TrainingSandbox:
                          (self.gw, self.height), 3)
         self._draw_ranking(screen, state)
         self._draw_header(screen, state)
+        self.network.input_labels = state.input_labels
+        self.network.output_labels = state.output_labels
+        self.network.input_values = state.input_values
+        self.network.output_values = state.output_values
         self.network.update(dt, state.network)
         self.network.draw(screen)
         if state.best is not None:
             self._draw_best_view(screen, state.best)
+        self._draw_chart(screen, state)
 
     def _draw_games(self, screen: pygame.Surface) -> None:
         count = len(self.games)
@@ -289,9 +326,9 @@ class TrainingSandbox:
                     (x + 110, y))
 
     def _draw_best_view(self, screen: pygame.Surface, best) -> None:
-        size = 210
+        size = 180
         panel = pygame.Rect(0, 0, size, size)
-        panel.midtop = (self.sidebar.centerx, 570)
+        panel.midtop = (self.sidebar.centerx, 552)
         label = self.font_small.render("BEST INDIVIDUAL", True, _DIM)
         screen.blit(label, (panel.left, panel.top - 26))
 
@@ -309,3 +346,46 @@ class TrainingSandbox:
         score = getattr(best, "score", 0)
         text = self.font.render(f"{name}: {score}", True, _INK)
         screen.blit(text, (panel.left, panel.bottom + 6))
+
+    def _draw_chart(self, screen: pygame.Surface,
+                    state: SandboxState) -> None:
+        label = self.font_small.render("RECORD BY GENERATION", True, _DIM)
+        chart = pygame.Rect(self.sidebar.left + 24, 800,
+                            self.sidebar_width - 48, 98)
+        screen.blit(label, (chart.left, chart.top - 24))
+        pygame.draw.rect(screen, (18, 20, 26), chart)
+        pygame.draw.rect(screen, (70, 74, 88), chart, 2)
+
+        history = state.history or []
+        if not history:
+            return
+        generations = [g for g, _ in history]
+        scores = [s for _, s in history]
+        gen_min, gen_max = min(generations), max(generations)
+        score_max = max(1, max(scores))
+        pad = 8
+        plot = chart.inflate(-2 * pad, -2 * pad)
+
+        def to_point(gen, score):
+            gx = plot.left if gen_max == gen_min else (
+                plot.left + (gen - gen_min) / (gen_max - gen_min) * plot.width)
+            gy = plot.bottom - (score / score_max) * plot.height
+            return (int(gx), int(gy))
+
+        pygame.draw.line(screen, (60, 64, 76), (plot.left, plot.bottom),
+                         (plot.right, plot.bottom), 1)
+        pygame.draw.line(screen, (60, 64, 76), (plot.left, plot.top),
+                         (plot.left, plot.bottom), 1)
+        points = [to_point(g, s) for g, s in history]
+        if len(points) > 1:
+            pygame.draw.lines(screen, (255, 190, 70), False, points, 2)
+        for point in points:
+            pygame.draw.circle(screen, (255, 225, 120), point, 3)
+
+        top_label = self.font_small.render(str(score_max), True, _OUTPUT_COLOR)
+        screen.blit(top_label, (chart.left + 4, chart.top + 2))
+        bottom_label = self.font_small.render(str(gen_min), True, _DIM)
+        screen.blit(bottom_label, (chart.left + 4, chart.bottom - 20))
+        right_label = self.font_small.render(str(gen_max), True, _DIM)
+        screen.blit(right_label, (chart.right - 6 - right_label.get_width(),
+                                  chart.bottom - 20))

@@ -57,10 +57,10 @@ class DQNPopulation:
     @staticmethod
     def _forward(theta: Dict[str, torch.Tensor],
                  x: torch.Tensor) -> torch.Tensor:
-        h1 = F.relu(torch.einsum("nbi,nki->nbk", x, theta["W1"]) +
-                    theta["b1"].unsqueeze(1))
-        h2 = F.relu(torch.einsum("nbi,nki->nbk", h1, theta["W2"]) +
-                    theta["b2"].unsqueeze(1))
+        h1 = F.leaky_relu(torch.einsum("nbi,nki->nbk", x, theta["W1"]) +
+                          theta["b1"].unsqueeze(1), 0.01)
+        h2 = F.leaky_relu(torch.einsum("nbi,nki->nbk", h1, theta["W2"]) +
+                          theta["b2"].unsqueeze(1), 0.01)
         return torch.einsum("nbi,nki->nbk", h2, theta["W3"]) + \
             theta["b3"].unsqueeze(1)
 
@@ -69,10 +69,12 @@ class DQNPopulation:
                                      np.ndarray]:
         with torch.no_grad():
             x = observations.unsqueeze(1)
-            h1 = F.relu(torch.einsum("nbi,nki->nbk", x, self.online["W1"]) +
-                        self.online["b1"].unsqueeze(1))
-            h2 = F.relu(torch.einsum("nbi,nki->nbk", h1, self.online["W2"]) +
-                        self.online["b2"].unsqueeze(1))
+            h1 = F.leaky_relu(
+                torch.einsum("nbi,nki->nbk", x, self.online["W1"]) +
+                self.online["b1"].unsqueeze(1), 0.01)
+            h2 = F.leaky_relu(
+                torch.einsum("nbi,nki->nbk", h1, self.online["W2"]) +
+                self.online["b2"].unsqueeze(1), 0.01)
             q = torch.einsum("nbi,nki->nbk", h2, self.online["W3"]) + \
                 self.online["b3"].unsqueeze(1)
             return (
@@ -97,15 +99,21 @@ class DQNPopulation:
 
     def train(self, obs: torch.Tensor, nxt: torch.Tensor, act: torch.Tensor,
               rew: torch.Tensor, done: torch.Tensor, gamma: float,
-              target_update: int) -> float:
+              target_update: int, grad_clip: float = 0.0) -> float:
         q_values = self._forward(self.online, obs)
         q_selected = q_values.gather(2, act.unsqueeze(2)).squeeze(2)
         with torch.no_grad():
-            q_next = self._forward(self.target, nxt).max(dim=2).values
+            next_actions = self._forward(self.online, nxt).argmax(
+                dim=2, keepdim=True)
+            q_next = self._forward(self.target, nxt).gather(
+                2, next_actions).squeeze(2)
             target = rew + gamma * q_next * (1.0 - done)
         loss = F.smooth_l1_loss(q_selected, target)
         self.optimizer.zero_grad()
         loss.backward()
+        if grad_clip > 0:
+            torch.nn.utils.clip_grad_norm_(list(self.online.values()),
+                                           grad_clip)
         self.optimizer.step()
         self.learn_steps += 1
         if target_update > 0 and self.learn_steps % target_update == 0:
@@ -168,8 +176,8 @@ class SingleAgentDQN:
         return cls(checkpoint["weights"], device)
 
     def q_values(self, observations: torch.Tensor) -> torch.Tensor:
-        h1 = F.relu(observations @ self.w["W1"].t() + self.w["b1"])
-        h2 = F.relu(h1 @ self.w["W2"].t() + self.w["b2"])
+        h1 = F.leaky_relu(observations @ self.w["W1"].t() + self.w["b1"], 0.01)
+        h2 = F.leaky_relu(h1 @ self.w["W2"].t() + self.w["b2"], 0.01)
         return h2 @ self.w["W3"].t() + self.w["b3"]
 
     def act(self, observations: torch.Tensor) -> torch.Tensor:

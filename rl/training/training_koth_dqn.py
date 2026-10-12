@@ -11,9 +11,10 @@ import pygame
 import torch
 
 from game.config import SIMPLE_HILL, SceneConfig, build_agents
-from game.interface import GameInterface
+from game.interface import ACTION_NAMES, GameInterface
 from rl.dqn import DQNPopulation, ReplayBuffer, get_device
-from rl.observations import OBSERVATION_SIZE, build_observations
+from rl.observations import (OBSERVATION_LABELS, OBSERVATION_SIZE,
+                             build_observations)
 from rl.sandbox import SandboxState, TrainingSandbox
 
 # ---------------------------------------------------------------------------
@@ -22,32 +23,37 @@ from rl.sandbox import SandboxState, TrainingSandbox
 CONFIG = {
     "seed": 0,
     "num_agents": 5,
-    "hidden": 10,
+    "hidden": 5,
     "device": "auto",                 # "auto" | "cuda" | "cpu"
-    "learning_rate": 1e-3,
+    "learning_rate": 1e-2,
     "gamma": 0.99,
     "batch_size": 64,
     "replay_capacity": 20000,
     "min_replay": 1000,
     "train_every": 2,                 # learn once every N decisions
     "target_update": 500,             # learn steps between target copies
+    "grad_clip": 10.0,                # gradient norm clipping (0 = off)
+    "reward_scale": 100.0,            # scales rewards so TD targets are O(1)
     "frame_skip": 4,                  # act once every N game frames
     # Exploration (epsilon-greedy)
     "epsilon_start": 1.0,
-    "epsilon_end": 0.05,
-    "epsilon_decay_steps": 1000,
+    "epsilon_end": 0.15,
+    "epsilon_decay_steps": 1500,
     "epsilon_reset_per_generation": False,
     # Evolution
     "replace_fraction": 0.5,          # worst fraction replaced by best copy
     "mutation_prob": 0.10,            # per-weight mutation probability
     "mutation_std": 0.05,             # gaussian noise std
     # Reward
-    "time_penalty": 0.01,             # per decision without scoring
-    "death_penalty": 1.0,
-    "lava_penalty": 2.0,              # extra when death cause is lava
+    "time_penalty": 0.05,             # per SECOND without scoring
+    "death_penalty": 4.0,             # must exceed max time_penalty accrual
+    "lava_penalty": 6.0,              # when death cause is lava
+    "miss_penalty": 0.02,             # per punch that hits nobody
+    "approach_scale": 0.5,            # shaping: get closer to the flag
+    "zone_reward": 0.2,               # per second standing in the flag zone
     "obs_horizon": 30.0,             # seconds used to normalize time
     # Episode / generation
-    "max_generation_seconds": 300.0,
+    "max_generation_seconds": 60.0,
     # Rendering / sandbox
     "render": True,
     "fps": 60,
@@ -68,12 +74,17 @@ def epsilon_for(step: int, cfg: dict) -> float:
 
 def display_activations(activations, index: int):
     obs, h1, h2, q = activations
+
+    def normalize(values):
+        magnitudes = np.abs(np.asarray(values, dtype=float))
+        peak = magnitudes.max()
+        if peak < 1e-9:
+            return magnitudes
+        return np.clip(magnitudes / peak, 0.0, 1.0)
+
     inputs = np.clip(np.abs(obs[index]), 0.0, 1.0)
-    hidden1 = np.clip(np.tanh(h1[index]), 0.0, 1.0)
-    hidden2 = np.clip(np.tanh(h2[index]), 0.0, 1.0)
-    outputs = 1.0 / (1.0 + np.exp(-q[index]))
-    return [inputs.tolist(), hidden1.tolist(), hidden2.tolist(),
-            outputs.tolist()]
+    return [inputs.tolist(), normalize(h1[index]).tolist(),
+            normalize(h2[index]).tolist(), normalize(q[index]).tolist()]
 
 
 def main() -> None:
@@ -130,6 +141,7 @@ def main() -> None:
     generation = 1
     global_decisions = 0
     best_record = -1
+    history = []
     running = True
 
     while running:
@@ -140,6 +152,8 @@ def main() -> None:
                                    dtype=torch.float32, device=device)
         prev_alive = torch.tensor([p.alive for p in env.agents],
                                   dtype=torch.bool, device=device)
+        prev_missed = torch.tensor([p.missed_punches for p in env.agents],
+                                   dtype=torch.float32, device=device)
 
         frame = 0
         decision_in_gen = 0
@@ -154,9 +168,12 @@ def main() -> None:
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         running = False
-                    elif (event.type == pygame.KEYDOWN
-                          and event.key == pygame.K_ESCAPE):
-                        running = False
+                    elif event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_ESCAPE:
+                            running = False
+                        elif event.key == pygame.K_t:
+                            env.world.show_sensors = \
+                                not env.world.show_sensors
             else:
                 dt = 1.0 / cfg["fps"]
             gen_elapsed += dt
@@ -180,6 +197,9 @@ def main() -> None:
                                           dtype=torch.float32, device=device)
                 new_alive = torch.tensor([p.alive for p in env.agents],
                                          dtype=torch.bool, device=device)
+                new_obs = torch.tensor(
+                    build_observations(env.world, env.agents,
+                                       cfg["obs_horizon"]), device=device)
                 delta = new_scores - prev_scores
                 died = prev_alive & ~new_alive
                 penalty = torch.zeros(count, device=device)
@@ -188,11 +208,27 @@ def main() -> None:
                         cause = env.agents[i].death_cause
                         penalty[i] = (cfg["lava_penalty"] if cause == "lava"
                                       else cfg["death_penalty"])
-                reward = (delta - cfg["time_penalty"] * (delta == 0).float()
-                          - penalty)
-                new_obs = torch.tensor(
-                    build_observations(env.world, env.agents,
-                                       cfg["obs_horizon"]), device=device)
+                missed = torch.tensor(
+                    [p.missed_punches for p in env.agents],
+                    dtype=torch.float32, device=device)
+                miss_delta = missed - prev_missed
+                prev_missed = missed
+                step_seconds = cfg["frame_skip"] / cfg["fps"]
+                approach = cfg["approach_scale"] * (obs[:, 1] - new_obs[:, 1])
+                zone = torch.tensor(
+                    [1.0 if p.alive and p.in_zone(
+                        env.world.flag_x, env.world.zone_half,
+                        env.world.flag_ground_y, env.world.zone_height)
+                     else 0.0 for p in env.agents],
+                    dtype=torch.float32, device=device)
+                reward = (delta
+                          - cfg["time_penalty"] * (delta == 0).float()
+                          * step_seconds
+                          - penalty
+                          - cfg["miss_penalty"] * miss_delta
+                          + approach
+                          + cfg["zone_reward"] * step_seconds * zone)
+                reward = reward * cfg["reward_scale"]
                 done = (~new_alive).float()
                 replay.push(obs, actions, reward, new_obs, done)
                 prev_scores, prev_alive = new_scores, new_alive
@@ -202,7 +238,8 @@ def main() -> None:
                     loss_value = pop.train(
                         *replay.sample(cfg["batch_size"]),
                         gamma=cfg["gamma"],
-                        target_update=cfg["target_update"])
+                        target_update=cfg["target_update"],
+                        grad_clip=cfg["grad_clip"])
                 decision_in_gen += 1
                 global_decisions += 1
 
@@ -219,8 +256,8 @@ def main() -> None:
                      "alive": env.agents[i].alive}
                     for i in order[:8]
                 ]
-                network = display_activations(pop.layer_activations(obs),
-                                              best_index)
+                activations = pop.layer_activations(obs)
+                network = display_activations(activations, best_index)
                 state = SandboxState(
                     generation=generation,
                     population=count,
@@ -230,6 +267,11 @@ def main() -> None:
                     network=network,
                     best=env.agents[best_index],
                     ranking=ranking,
+                    input_labels=OBSERVATION_LABELS,
+                    output_labels=ACTION_NAMES,
+                    input_values=activations[0][best_index].tolist(),
+                    output_values=activations[3][best_index].tolist(),
+                    history=history,
                 )
                 sandbox.draw(screen, state, dt)
                 pygame.display.flip()
@@ -245,6 +287,7 @@ def main() -> None:
                               dtype=torch.float32, device=device)
         gen_best_index = int(torch.argmax(scores).item())
         gen_best_score = int(scores.max().item())
+        history.append((generation, gen_best_score))
         if cfg["save_best"] and gen_best_score > best_record:
             best_record = gen_best_score
             torch.save(
