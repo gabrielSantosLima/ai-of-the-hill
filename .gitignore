@@ -3,3 +3,4 @@ __pycache__
 best_weights/
 checkpoints/
 *.pt
+bkp
