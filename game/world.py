@@ -13,6 +13,7 @@ from .lava import Lava
 from .pickups import Pickup
 from .player import Player
 from .powers import POWER_UPS, Explosion
+from .sensors import DIRECTIONS, head_position, sensor_distances
 from .terrain import Terrain
 
 _LAVA_PATH = os.path.join(
@@ -73,6 +74,7 @@ class World:
         self.flag_x = self.level.flag_position()
         self.flag_ground_y = self.terrain.height_at(self.flag_x)
         self.zone_half = self.level.flag_zone_width / 2.0
+        self.zone_height = self.level.flag_zone_height
         self.lava = Lava(_LAVA_PATH, self.level, scene.window.height,
                          scene.lava_height_fraction)
         self.background = Background()
@@ -87,6 +89,7 @@ class World:
         self._pickup_interval = (18.0, 30.0)
         self._pickup_margin = 90.0
         self._flag_pickup_weight = 0.25
+        self.show_sensors = False
 
     def handle_keyboard(self) -> None:
         keys = pygame.key.get_pressed()
@@ -247,7 +250,7 @@ class World:
         alive = [p for p in self.players if p.alive]
         in_zone = [p for p in alive
                    if p.in_zone(self.flag_x, self.zone_half,
-                                self.flag_ground_y)]
+                                self.flag_ground_y, self.zone_height)]
         if len(in_zone) == 1:
             player = in_zone[0]
             if player.zone_time < self.scene.max_zone_seconds:
@@ -349,11 +352,35 @@ class World:
         for player in self.players:
             if player.alive:
                 player.draw(surface, ss)
+        if self.show_sensors:
+            self._draw_sensors(surface, ss)
         for bomb in self.dynamites:
             bomb.draw(surface, ss)
         for effect in self.effects:
             effect.draw(surface, ss)
         self._draw_floaters(surface, ss)
+
+    def _draw_sensors(self, surface: pygame.Surface, ss: float) -> None:
+        width = self.level.width
+        colors = [(255, 90, 90), (90, 180, 255), (255, 190, 70),
+                  (150, 255, 150), (255, 120, 200), (210, 255, 120)]
+        directions = list(DIRECTIONS.values())
+        for player in self.players:
+            if not player.alive:
+                continue
+            hx, hy = head_position(player)
+            distances = sensor_distances(self, player)
+            for (dx, dy), distance, color in zip(directions, distances,
+                                                 colors):
+                length = min(distance if distance != math.inf else width,
+                             width)
+                end = (hx + dx * length, hy + dy * length)
+                pygame.draw.line(surface, color, (int(hx * ss), int(hy * ss)),
+                                 (int(end[0] * ss), int(end[1] * ss)), 2)
+                pygame.draw.circle(surface, color,
+                                   (int(end[0] * ss), int(end[1] * ss)), 3)
+            pygame.draw.circle(surface, (255, 255, 255),
+                               (int(hx * ss), int(hy * ss)), 3)
 
     def _draw_floaters(self, surface: pygame.Surface, ss: float) -> None:
         font = _font(int(58 * ss))

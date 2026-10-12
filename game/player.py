@@ -90,6 +90,7 @@ class Player:
         self.score = 0
         self.alive = True
         self.zone_time = 0.0
+        self.missed_punches = 0
         self.item = None
         self.death_cause = None
 
@@ -98,9 +99,9 @@ class Player:
         return 9 * self.scale
 
     def in_zone(self, flag_x: float, half_width: float,
-                ground_y: float) -> bool:
+                ground_y: float, height: float = 300.0) -> bool:
         return (self.alive and abs(self.x - flag_x) <= half_width and
-                self.y <= ground_y + 30 * self.scale)
+                ground_y - height <= self.y <= ground_y + 30 * self.scale)
 
     def kill(self, cause: Optional[str] = None) -> None:
         self.alive = False
@@ -173,6 +174,8 @@ class Player:
         self.angle = math.atan(slope)
         if self.punch_timer > 0:
             self.punch_timer = max(0.0, self.punch_timer - dt)
+            if self.punch_timer <= 0 and not self.punch_hit:
+                self.missed_punches += 1
         if self.cooldown_timer > 0:
             self.cooldown_timer = max(0.0, self.cooldown_timer - dt)
 

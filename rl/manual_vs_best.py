@@ -71,6 +71,8 @@ def main() -> None:
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
+                elif event.key == pygame.K_t:
+                    env.world.show_sensors = not env.world.show_sensors
                 elif event.key == pygame.K_r:
                     env.reset()
                     hero = env.world.controllables[0]

@@ -33,6 +33,7 @@ class LevelConfig:
     flag_width: float = 40.0
     flag_x: Optional[float] = None
     flag_zone_width: float = 130.0
+    flag_zone_height: float = 300.0
 
     def peak(self) -> Point:
         return min(self.control_points, key=lambda p: p[1])

@@ -115,7 +115,8 @@ class GameInterface:
                 reward += self.reward_death
             if player.alive and player.in_zone(self.world.flag_x,
                                                self.world.zone_half,
-                                               self.world.flag_ground_y):
+                                               self.world.flag_ground_y,
+                                               self.world.zone_height):
                 reward += self.reward_zone * self.dt
             rewards.append(reward)
         self._reset_counters()
@@ -144,7 +145,8 @@ class GameInterface:
             (world.flag_x - agent.x) / width,
             (world.flag_ground_y - agent.y) / height,
             1.0 if agent.in_zone(world.flag_x, world.zone_half,
-                                 world.flag_ground_y) else 0.0,
+                                 world.flag_ground_y,
+                                 world.zone_height) else 0.0,
             1.0 if world.lava.active else 0.0,
             (world.lava.surface_y - agent.y) / height,
             max(0.0, 1.0 - world.time / 180.0),
@@ -159,7 +161,8 @@ class GameInterface:
                 1.0 if other.alive else 0.0,
                 1.0 if other.item is not None else 0.0,
                 1.0 if other.in_zone(world.flag_x, world.zone_half,
-                                     world.flag_ground_y) else 0.0,
+                                     world.flag_ground_y,
+                                     world.zone_height) else 0.0,
             ])
         if world.pickups:
             pickup = min(world.pickups,
@@ -189,7 +192,8 @@ class GameInterface:
                     "alive": p.alive,
                     "has_item": p.item is not None,
                     "in_zone": p.in_zone(world.flag_x, world.zone_half,
-                                         world.flag_ground_y),
+                                         world.flag_ground_y,
+                                         world.zone_height),
                     "stun": p.stun,
                 }
                 for p in self.agents
